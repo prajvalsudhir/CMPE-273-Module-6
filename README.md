@@ -144,6 +144,61 @@ inventory   10.244.0.10:8080,10.244.0.7:8080
 
 ![Pod deletion and replacement](screenshots/pod-deletion.png)
 
+### Continuous client log spanning Pod deletion
+
+A second deletion was run with the client log followed across it,
+so one log shows requests before, during, and after the deletion,
+with no tail-only gap. Commands used (`$OLD` was
+`inventory-6998dd9945-crj96`):
+
+```bash
+OLD=$(kubectl get pods -l app=inventory --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+kubectl logs -f deployment/client > evidence/deletion-continuous-log.txt &
+# sleep 10s, then
+kubectl delete pod "$OLD"
+kubectl wait --for=condition=ready pod -l app=inventory --timeout=120s
+# sleep 10s, then stop the log follow
+kubectl get pods -l app=inventory
+kubectl get svc inventory
+kubectl get endpoints inventory
+```
+
+`crj96` was deleted and `fxrr4` replaced it, with the Service name
+and ClusterIP unchanged. In the continuous log, requests 108–112
+were served by the old Pods, request 113 was the first served by
+`fxrr4`, and requests after that alternate between `fxrr4` and
+`zjh5x` — consecutive request numbers, no error at the transition.
+Note: this client Pod had restarted with minikube, so its first 9
+requests failed DNS while the cluster came back up; from request 10
+onward it served continuously, including across this deletion.
+
+```
+inventory-6998dd9945-crj96   1/1     Running   1 (2m8s ago)   14h
+inventory-6998dd9945-zjh5x   1/1     Running   1 (2m8s ago)   14h
+inventory   ClusterIP   10.110.115.98   <none>        80/TCP    14h
+inventory   10.244.0.3:8080,10.244.0.4:8080
+Deleting pod: inventory-6998dd9945-crj96
+inventory-6998dd9945-fxrr4   1/1     Running   0            42s
+inventory-6998dd9945-zjh5x   1/1     Running   1 (3m ago)   14h
+inventory   ClusterIP   10.110.115.98   <none>        80/TCP    14h
+inventory   10.244.0.4:8080,10.244.0.6:8080
+[client] request 108 -> served by inventory-6998dd9945-crj96
+[client] request 109 -> served by inventory-6998dd9945-zjh5x
+[client] request 110 -> served by inventory-6998dd9945-zjh5x
+[client] request 111 -> served by inventory-6998dd9945-zjh5x
+[client] request 112 -> served by inventory-6998dd9945-zjh5x
+[client] request 113 -> served by inventory-6998dd9945-fxrr4
+[client] request 114 -> served by inventory-6998dd9945-zjh5x
+[client] request 115 -> served by inventory-6998dd9945-zjh5x
+[client] request 116 -> served by inventory-6998dd9945-fxrr4
+[client] request 117 -> served by inventory-6998dd9945-zjh5x
+[client] request 118 -> served by inventory-6998dd9945-fxrr4
+[client] request 119 -> served by inventory-6998dd9945-fxrr4
+[client] request 120 -> served by inventory-6998dd9945-fxrr4
+```
+
+![Continuous client log spanning Pod deletion](screenshots/pod-deletion-continuous.png)
+
 ## Why is a stable Service name useful when Pods can fail or be replaced?
 
 A stable Service name is useful because Pods are not stable. They can
